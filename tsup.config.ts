@@ -4,7 +4,12 @@ import { writeCjsEntrypoints } from './scripts/postbuild.mjs';
 export default defineConfig({
     entry: ['src/index.ts'],
     format: ['esm', 'cjs'],
-    dts: true,
+    dts: {
+        compilerOptions: {
+            // tsup always sets baseUrl, which TypeScript 6 deprecates.
+            ignoreDeprecations: '6.0'
+        }
+    },
     sourcemap: true,
     clean: true,
     treeshake: true,

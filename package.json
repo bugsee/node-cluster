@@ -40,14 +40,14 @@
     "@types/chai": "^4.3.16",
     "@types/mocha": "^10.0.10",
     "@types/node": "^24.13.3",
-    "@typescript-eslint/eslint-plugin": "^6.21.0",
-    "@typescript-eslint/parser": "^6.21.0",
+    "@typescript-eslint/eslint-plugin": "^8.68.0",
+    "@typescript-eslint/parser": "^8.68.0",
     "chai": "4.3.7",
-    "eslint": "8.34.0",
+    "eslint": "8.57.1",
     "eslint-config-airbnb-base": "15.0.0",
     "eslint-plugin-import": "2.27.5",
     "mocha": "10.2.0",
     "tsup": "^8.3.5",
-    "typescript": "^5.9.3"
+    "typescript": "^6.0.3"
   }
 }
