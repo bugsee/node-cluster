@@ -1,0 +1,53 @@
+{
+  "name": "@bugsee/node-cluster",
+  "version": "1.0.0",
+  "description": "Node.js cluster primary: fork, rolling restart, respawn, REPL. Dual ESM + CommonJS. Drop-in successor to cluster-master-ext.",
+  "license": "BSD-3-Clause",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bugsee/node-cluster.git"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsup",
+    "test": "npm run build && mocha",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json",
+    "eslint": "eslint -c ./.eslintrc.cjs --ext .ts,.cjs --quiet ./src ./test ./types",
+    "check:dist": "npm run build && git diff --exit-code -- dist && test -z \"$(git status --porcelain -- dist)\""
+  },
+  "devDependencies": {
+    "@types/chai": "^4.3.16",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^24.13.3",
+    "@typescript-eslint/eslint-plugin": "^6.21.0",
+    "@typescript-eslint/parser": "^6.21.0",
+    "chai": "4.3.7",
+    "eslint": "8.34.0",
+    "eslint-config-airbnb-base": "15.0.0",
+    "eslint-plugin-import": "2.27.5",
+    "mocha": "10.2.0",
+    "tsup": "^8.3.5",
+    "typescript": "^5.9.3"
+  }
+}
