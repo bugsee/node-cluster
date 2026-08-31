@@ -8,10 +8,12 @@ import {
     STOP_TIMEOUT_MS,
     SKEPTIC_TIMEOUT_MS,
     MIN_ALIVE_MS,
+    ALIVE_TIMEOUT_MS,
     DEFAULT_REPL
 } from './constants';
 import { startRepl } from './repl';
 import type { ReplHandle } from './repl';
+import { packageState } from './state';
 import type {
     ClusterEmitter,
     ClusterMessageHandler,
@@ -71,6 +73,8 @@ export class ClusterPrimary {
 
     #minAliveMs: number;
 
+    #aliveTimeout: number;
+
     #silenceDebug: boolean;
 
     #aliveEvent: string;
@@ -97,9 +101,17 @@ export class ClusterPrimary {
 
     #resizing = false;
 
+    #refill = false;
+
+    #resizeTail: Promise<void> = Promise.resolve();
+
     #started = false;
 
     #closed = false;
+
+    #exited = false;
+
+    #startPromise: Promise<void> | null = null;
 
     #disconnectTimers = new Map<number, NodeJS.Timeout>();
 
@@ -126,8 +138,7 @@ export class ClusterPrimary {
         }
         if (!isPrimaryProcess()) {
             throw new Error(
-                'ClusterMaster answers to no one!\n' +
-                '(don\'t run in a cluster worker script)'
+                'Must run in the Node.js cluster primary process'
             );
         }
 
@@ -136,9 +147,10 @@ export class ClusterPrimary {
         this.#env = cfg.env || {};
         this.#onMessage = cfg.onMessage || cfg.onmessage;
         this.#signalsEnabled = cfg.signals !== false;
-        this.#stopTimeout = cfg.stopTimeout || STOP_TIMEOUT_MS;
-        this.#skepticTimeout = cfg.skepticTimeout || SKEPTIC_TIMEOUT_MS;
-        this.#minAliveMs = cfg.minAliveMs || MIN_ALIVE_MS;
+        this.#stopTimeout = cfg.stopTimeout ?? STOP_TIMEOUT_MS;
+        this.#skepticTimeout = cfg.skepticTimeout ?? SKEPTIC_TIMEOUT_MS;
+        this.#minAliveMs = cfg.minAliveMs ?? MIN_ALIVE_MS;
+        this.#aliveTimeout = cfg.aliveTimeout ?? ALIVE_TIMEOUT_MS;
         this.#silenceDebug = Boolean(cfg.silenceDebug);
         this.#aliveEvent = cfg.aliveEvent || 'listening';
         this.#replAddress = typeof cfg.repl !== 'undefined' ? cfg.repl : DEFAULT_REPL;
@@ -176,10 +188,15 @@ export class ClusterPrimary {
     }
 
     start(): Promise<void> {
-        if (this.#started) {
-            throw new Error('This cluster has a master already');
+        if (this.#closed) {
+            throw new Error('cluster primary is closed');
+        }
+        const st = packageState();
+        if (this.#started || (st.owner && st.owner !== this)) {
+            throw new Error('This process already has a cluster primary');
         }
         this.#started = true;
+        st.owner = this;
 
         const masterConf: ClusterSettings = { exec: path.resolve(this.#config.exec) };
         if (this.#config.silent) {
@@ -199,11 +216,12 @@ export class ClusterPrimary {
 
         const self = this;
         this.debug(this.#replAddress ? 'resize and then setup repl' : 'resize');
-        return this.#resizeTo().then(function () {
+        this.#startPromise = this.#resizeTo().then(function () {
             if (!self.#closed) {
                 self.#startRepl();
             }
         });
+        return this.#startPromise;
     }
 
     emitter(): ClusterEmitter {
@@ -274,6 +292,7 @@ export class ClusterPrimary {
         this.#emitter.emit('quitHard');
         const self = this;
         process.nextTick(function () {
+            self.#size = 0;
             self.#quitting = true;
             self.#doQuit();
         });
@@ -289,11 +308,21 @@ export class ClusterPrimary {
         this.#removeSignals();
         cluster.removeListener('fork', this.#onFork);
 
-        const self = this;
-        const replClose = this.#repl ? this.#repl.close() : Promise.resolve();
-        this.#repl = null;
+        const st = packageState();
+        if (st.owner === this) {
+            st.owner = null;
+        }
+        if (st.singleton === this) {
+            st.singleton = null;
+        }
 
-        return replClose.then(function () {
+        const self = this;
+        const pending = this.#startPromise || Promise.resolve();
+        return pending.then(function () {
+            const replClose = self.#repl ? self.#repl.close() : Promise.resolve();
+            self.#repl = null;
+            return replClose;
+        }).then(function () {
             return self.#killRemaining();
         }).then(function () {
             if (self.#previousSettings) {
@@ -401,8 +430,15 @@ export class ClusterPrimary {
                 self.debug('Worker %j exited', id);
             }
 
-            if (workerList().length < self.#size && !self.#resizing) {
-                self.#resizeTo();
+            if (self.#closed || self.#quitting || self.#restarting) {
+                return;
+            }
+            if (workerList().length < self.#size) {
+                if (self.#resizing) {
+                    self.#refill = true;
+                } else {
+                    self.#resizeTo();
+                }
             }
         });
 
@@ -450,17 +486,32 @@ export class ClusterPrimary {
         return cp;
     }
 
+    #forkAndWaitAlive(): Promise<ClusterWorker> {
+        if (this.#closed) {
+            return Promise.reject(new Error('cluster primary is closed'));
+        }
+        try {
+            return this.#waitAlive(this.#forkChild());
+        } catch (err) {
+            return Promise.reject(err);
+        }
+    }
+
     #waitAlive(worker: ClusterWorker): Promise<ClusterWorker> {
         const self = this;
         return new Promise(function (resolve, reject) {
             let done = false;
-            let onAlive: () => void;
-            let onExit: () => void;
+            let onAlive: () => void = function () {};
+            let onExit: () => void = function () {};
+            let timer: NodeJS.Timeout | undefined;
             function finish(err: Error | null, value?: ClusterWorker): void {
                 if (done) {
                     return;
                 }
                 done = true;
+                if (timer) {
+                    clearTimeout(timer);
+                }
                 worker.removeListener(self.#aliveEvent, onAlive);
                 worker.removeListener('exit', onExit);
                 if (err) {
@@ -477,13 +528,17 @@ export class ClusterPrimary {
             onExit = function () {
                 finish(new Error('Worker exited before ' + self.#aliveEvent));
             };
+            if (self.#aliveTimeout > 0) {
+                timer = setTimeout(function () {
+                    if (worker.process) {
+                        worker.process.kill('SIGKILL');
+                    }
+                    finish(new Error('Worker timed out waiting for ' + self.#aliveEvent));
+                }, self.#aliveTimeout);
+            }
             worker.once(self.#aliveEvent, onAlive);
             worker.once('exit', onExit);
         });
-    }
-
-    #forkAndWaitAlive(): Promise<ClusterWorker> {
-        return this.#waitAlive(this.#forkChild());
     }
 
     #waitSkeptic(newbie: ClusterWorker): Promise<boolean> {
@@ -532,6 +587,10 @@ export class ClusterPrimary {
             });
             if (worker.process && worker.process.connected) {
                 self.#emitAndDisconnect(worker);
+                return;
+            }
+            if (worker.process) {
+                worker.process.kill('SIGKILL');
             }
         });
     }
@@ -541,69 +600,108 @@ export class ClusterPrimary {
         let done: (() => void) | undefined = cb;
         if (typeof n === 'function') {
             done = n;
-            target = this.#size;
+            target = undefined;
         } else {
             target = n;
         }
+        if (typeof target === 'number' && target >= 0) {
+            if (target < this.#size) {
+                this.#nextWorkerIdx = target;
+            }
+            this.#size = target;
+        }
 
-        const p = this.#resizeInner(target);
+        const self = this;
+        this.#resizeTail = this.#resizeTail.then(
+            function () {
+                return self.#matchSize();
+            },
+            function () {
+                return self.#matchSize();
+            }
+        );
+        const run = this.#resizeTail;
         if (done) {
             const finished = done;
-            p.then(function () {
+            run.then(function () {
                 finished();
             }, function () {
                 finished();
             });
         }
-        return p;
+        return run;
     }
 
-    #resizeInner(n: number | undefined): Promise<void> {
+    #matchSize(): Promise<void> {
         if (this.#closed) {
             return Promise.resolve();
         }
-        if (this.#resizing) {
-            return Promise.resolve();
-        }
-        if (typeof n === 'number' && n >= 0) {
-            if (n < this.#size) {
-                this.#nextWorkerIdx = n;
-            }
-            this.#size = n;
-        }
-
-        const current = sortedWorkers();
-        const req = this.#size - current.length;
-        if (req === 0) {
-            return Promise.resolve();
-        }
-
         this.#resizing = true;
+        this.#refill = false;
         const self = this;
-        let work: Promise<unknown>;
-        if (req > 0) {
-            const forks: Promise<ClusterWorker>[] = [];
-            for (let i = 0; i < req; i += 1) {
-                this.debug('resizing up', req - i - 1);
-                forks.push(this.#forkAndWaitAlive());
+
+        function wave(): Promise<void> {
+            if (self.#closed) {
+                return Promise.resolve();
             }
-            work = Promise.all(forks);
-        } else {
-            const extras = current.slice(this.#size);
-            work = Promise.all(extras.map(function (worker) {
+            const current = sortedWorkers();
+            const req = self.#size - current.length;
+            if (req === 0) {
+                return Promise.resolve();
+            }
+            if (req > 0) {
+                const before = current.length;
+                const forks: Promise<ClusterWorker>[] = [];
+                for (let i = 0; i < req; i += 1) {
+                    self.debug('resizing up', req - i - 1);
+                    forks.push(self.#forkAndWaitAlive());
+                }
+                return Promise.allSettled(forks).then(function () {
+                    if (self.#closed) {
+                        return undefined;
+                    }
+                    const after = workerList().length;
+                    if (after <= before) {
+                        return undefined;
+                    }
+                    return wave();
+                });
+            }
+            const extras = current.slice(self.#size);
+            return Promise.all(extras.map(function (worker) {
                 self.debug('resizing down', worker.id);
                 return self.#disconnectAndWaitExit(worker);
-            }));
+            })).then(function () {
+                return wave();
+            });
         }
 
-        return work.then(function () {
+        return wave().then(function () {
             self.#resizing = false;
+            if (self.#refill && !self.#closed && !self.#restarting && !self.#quitting) {
+                self.#refill = false;
+                return self.#matchSize();
+            }
+            return undefined;
         }, function () {
             self.#resizing = false;
+            return undefined;
         });
     }
 
     #doRestart(cb?: (() => void) | undefined): void {
+        const self = this;
+
+        function finish(): void {
+            self.#restarting = false;
+            if (!self.#closed && !self.#quitting && workerList().length < self.#size) {
+                self.#resizeTo();
+            }
+            if (cb) {
+                cb();
+            }
+        }
+
         if (this.#restarting) {
             this.debug('Already restarting.  Cannot restart yet.');
             return;
@@ -612,14 +710,6 @@ export class ClusterPrimary {
 
         const current = Object.keys(cluster.workers || {});
         const reqs = this.#size - current.length;
-        const self = this;
-
-        function finish(): void {
-            self.#restarting = false;
-            if (cb) {
-                cb();
-            }
-        }
 
         if (reqs !== 0) {
             this.debug('resize %d -> %d, change = %d', current.length, this.#size, reqs);
@@ -682,7 +772,7 @@ export class ClusterPrimary {
                 next();
             }).catch(function () {
                 self.debug('New worker died quickly. Aborting restart.');
-                self.#restarting = false;
+                cb();
             });
         }
 
@@ -692,12 +782,13 @@ export class ClusterPrimary {
     #doQuit(): void {
         if (this.#quitting) {
             this.debug('Forceful shutdown');
+            this.#size = 0;
             workerList().forEach(function (w) {
                 if (w.process) {
                     w.process.kill('SIGKILL');
                 }
             });
-            this.#exitFn(1);
+            this.#exitOnce(1);
             return;
         }
 
@@ -707,8 +798,16 @@ export class ClusterPrimary {
         const self = this;
         this.#resizeTo(0).then(function () {
             self.debug('Graceful shutdown successful');
-            self.#exitFn(0);
+            self.#exitOnce(0);
         });
+    }
+
+    #exitOnce(code: number): void {
+        if (this.#exited) {
+            return;
+        }
+        this.#exited = true;
+        this.#exitFn(code);
     }
 
     #killRemaining(): Promise<void> {

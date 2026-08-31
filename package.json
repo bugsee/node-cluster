@@ -1,12 +1,12 @@
 {
   "name": "@bugsee/node-cluster",
   "version": "1.0.0",
-  "description": "Node.js cluster primary: fork, rolling restart, respawn, REPL. Dual ESM + CommonJS. Drop-in successor to cluster-master-ext.",
+  "description": "Node.js cluster primary: fork, rolling restart, respawn, REPL. Dual ESM + CommonJS.",
   "license": "BSD-3-Clause",
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
-  "types": "./dist/index.d.ts",
+  "types": "./dist/index.d.cts",
   "exports": {
     ".": {
       "import": {
@@ -30,7 +30,7 @@
     "node": ">=18"
   },
   "scripts": {
-    "build": "tsup",
+    "build": "tsup && node ./scripts/postbuild.mjs",
     "test": "npm run build && mocha",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json",
     "eslint": "eslint -c ./.eslintrc.cjs --ext .ts,.cjs --quiet ./src ./test ./types",

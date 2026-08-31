@@ -13,7 +13,6 @@ export type ClusterWorker = Worker & {
 
 /**
  * IPC handler attached with `worker.on('message', handler)` so `this` is the Worker.
- * Same contract as cluster-master-ext / the appserver cache L2 handler.
  */
 export type ClusterMessageHandler = (
     this: ClusterWorker,
@@ -41,6 +40,8 @@ export interface ClusterPrimaryConfig {
     stopTimeout?: number | undefined;
     skepticTimeout?: number | undefined;
     minAliveMs?: number | undefined;
+    /** How long to wait for `aliveEvent` before SIGKILL. Default 30000. `0` waits indefinitely. */
+    aliveTimeout?: number | undefined;
     silenceDebug?: boolean | undefined;
     /** Event that means a worker is ready. Default `'listening'` (HTTP). Tests often use `'online'`. */
     aliveEvent?: string | undefined;
@@ -97,6 +98,7 @@ export interface ClusterConstants {
     readonly STOP_TIMEOUT_MS: number;
     readonly SKEPTIC_TIMEOUT_MS: number;
     readonly MIN_ALIVE_MS: number;
+    readonly ALIVE_TIMEOUT_MS: number;
     readonly DEFAULT_REPL: string;
 }
 

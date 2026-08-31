@@ -1,11 +1,43 @@
-import * as os from 'node:os';
-import * as path from 'node:path';
-import * as util from 'node:util';
-import cluster2 from 'node:cluster';
-import { EventEmitter } from 'node:events';
-import * as fs from 'node:fs';
-import * as net from 'node:net';
-import * as repl from 'node:repl';
+'use strict';
+
+Object.defineProperty(exports, '__esModule', { value: true });
+
+var os = require('node:os');
+var path = require('node:path');
+var util = require('node:util');
+var cluster2 = require('node:cluster');
+var node_events = require('node:events');
+var fs = require('node:fs');
+var net = require('node:net');
+var repl = require('node:repl');
+
+function _interopDefault (e) { return e && e.__esModule ? e : { default: e }; }
+
+function _interopNamespace(e) {
+  if (e && e.__esModule) return e;
+  var n = Object.create(null);
+  if (e) {
+    Object.keys(e).forEach(function (k) {
+      if (k !== 'default') {
+        var d = Object.getOwnPropertyDescriptor(e, k);
+        Object.defineProperty(n, k, d.get ? d : {
+          enumerable: true,
+          get: function () { return e[k]; }
+        });
+      }
+    });
+  }
+  n.default = e;
+  return Object.freeze(n);
+}
+
+var os__namespace = /*#__PURE__*/_interopNamespace(os);
+var path__namespace = /*#__PURE__*/_interopNamespace(path);
+var util__namespace = /*#__PURE__*/_interopNamespace(util);
+var cluster2__default = /*#__PURE__*/_interopDefault(cluster2);
+var fs__namespace = /*#__PURE__*/_interopNamespace(fs);
+var net__namespace = /*#__PURE__*/_interopNamespace(net);
+var repl__namespace = /*#__PURE__*/_interopNamespace(repl);
 
 var __defProp = Object.defineProperty;
 var __export = (target, all) => {
@@ -47,7 +79,7 @@ function createReplWorker(d) {
     state: d.state,
     age: d.age,
     disconnect: function() {
-      const w = cluster2.workers?.[d.id];
+      const w = cluster2__default.default.workers?.[d.id];
       if (w) {
         w.disconnect();
       }
@@ -66,7 +98,7 @@ function startRepl(host, replAddressPath) {
   let listenTarget = null;
   let socketAddress;
   if (typeof replAddressPath === "string") {
-    listenTarget = path.resolve(replAddressPath);
+    listenTarget = path__namespace.resolve(replAddressPath);
   } else if (typeof replAddressPath === "number") {
     listenTarget = replAddressPath;
   } else if (isAddressPort(replAddressPath)) {
@@ -110,7 +142,7 @@ function startRepl(host, replAddressPath) {
       restart: host.restart,
       stop: host.quit,
       kill: host.quitHard,
-      cluster: cluster2,
+      cluster: cluster2__default.default,
       get size() {
         return host.getSize();
       },
@@ -118,10 +150,10 @@ function startRepl(host, replAddressPath) {
         return connections;
       },
       get workers() {
-        const p = select(cluster2.workers, "pid");
-        const s = select(cluster2.workers, "state");
-        const a = select(cluster2.workers, "age");
-        return Object.keys(cluster2.workers || {}).map(function(k) {
+        const p = select(cluster2__default.default.workers, "pid");
+        const s = select(cluster2__default.default.workers, "state");
+        const a = select(cluster2__default.default.workers, "age");
+        return Object.keys(cluster2__default.default.workers || {}).map(function(k) {
           return createReplWorker({
             id: k,
             pid: p[k],
@@ -131,16 +163,16 @@ function startRepl(host, replAddressPath) {
         });
       },
       select: function(field) {
-        return select(cluster2.workers, field);
+        return select(cluster2__default.default.workers, field);
       },
       get pids() {
-        return select(cluster2.workers, "pid");
+        return select(cluster2__default.default.workers, "pid");
       },
       get ages() {
-        return select(cluster2.workers, "age");
+        return select(cluster2__default.default.workers, "age");
       },
       get states() {
-        return select(cluster2.workers, "state");
+        return select(cluster2__default.default.workers, "state");
       },
       debug: host.debug,
       sock
@@ -174,7 +206,7 @@ function startRepl(host, replAddressPath) {
     });
     debugStreams[streamKey] = sock;
     sock.write("Starting repl #" + String(sock.id));
-    const r = repl.start({
+    const r = repl__namespace.start({
       prompt: "cluster (`help` for cmds) " + process.pid + " " + String(sock.id) + "> ",
       input: sock,
       output: sock,
@@ -222,7 +254,7 @@ function startRepl(host, replAddressPath) {
     if (closed || listenTarget === null) {
       return;
     }
-    replServer = net.createServer(onConnection);
+    replServer = net__namespace.createServer(onConnection);
     function onListening() {
       if (closed) {
         return;
@@ -245,7 +277,7 @@ function startRepl(host, replAddressPath) {
     resolveListenReady = resolve3;
   });
   if (socketPath) {
-    fs.unlink(socketPath, function(err) {
+    fs__namespace.unlink(socketPath, function(err) {
       if (err && err.code !== "ENOENT") {
         host.debug("repl socket unlink failed", err);
       }
@@ -304,7 +336,7 @@ function packageState() {
 
 // src/primary.ts
 function workerList() {
-  const dict = cluster2.workers;
+  const dict = cluster2__default.default.workers;
   if (!dict) {
     return [];
   }
@@ -328,7 +360,7 @@ function sortedWorkers() {
   });
 }
 function isPrimaryProcess() {
-  return cluster2.isPrimary === true;
+  return cluster2__default.default.isPrimary === true;
 }
 var ClusterPrimary = class {
   #config;
@@ -346,7 +378,7 @@ var ClusterPrimary = class {
   #replHelp;
   #replContext;
   #exitFn;
-  #emitter = new EventEmitter();
+  #emitter = new node_events.EventEmitter();
   #debugStreams = {};
   #nextWorkerIdx = 0;
   #replaceWorkerIdxs = [];
@@ -379,7 +411,7 @@ var ClusterPrimary = class {
       );
     }
     this.#config = cfg;
-    this.#size = typeof cfg.size === "number" ? cfg.size : os.cpus().length;
+    this.#size = typeof cfg.size === "number" ? cfg.size : os__namespace.cpus().length;
     this.#env = cfg.env || {};
     this.#onMessage = cfg.onMessage || cfg.onmessage;
     this.#signalsEnabled = cfg.signals !== false;
@@ -430,16 +462,16 @@ var ClusterPrimary = class {
     }
     this.#started = true;
     st.owner = this;
-    const masterConf = { exec: path.resolve(this.#config.exec) };
+    const masterConf = { exec: path__namespace.resolve(this.#config.exec) };
     if (this.#config.silent) {
       masterConf.silent = true;
     }
     if (this.#config.args) {
       masterConf.args = this.#config.args;
     }
-    this.#previousSettings = Object.assign({}, cluster2.settings);
-    cluster2.setupPrimary(masterConf);
-    cluster2.on("fork", this.#onFork);
+    this.#previousSettings = Object.assign({}, cluster2__default.default.settings);
+    cluster2__default.default.setupPrimary(masterConf);
+    cluster2__default.default.on("fork", this.#onFork);
     if (this.#signalsEnabled) {
       this.#installSignals();
     }
@@ -460,7 +492,7 @@ var ClusterPrimary = class {
       console.error(...args);
     }
     this.#emitter.emit("debug", ...args);
-    const msg = util.format(...args);
+    const msg = util__namespace.format(...args);
     const self = this;
     Object.keys(this.#debugStreams).forEach(function(s) {
       const stream = self.#debugStreams[s];
@@ -528,7 +560,7 @@ var ClusterPrimary = class {
     this.#quitting = true;
     this.#size = 0;
     this.#removeSignals();
-    cluster2.removeListener("fork", this.#onFork);
+    cluster2__default.default.removeListener("fork", this.#onFork);
     const st = packageState();
     if (st.owner === this) {
       st.owner = null;
@@ -546,7 +578,7 @@ var ClusterPrimary = class {
       return self.#killRemaining();
     }).then(function() {
       if (self.#previousSettings) {
-        cluster2.setupPrimary(self.#previousSettings);
+        cluster2__default.default.setupPrimary(self.#previousSettings);
         self.#previousSettings = null;
       }
     });
@@ -690,7 +722,7 @@ var ClusterPrimary = class {
     });
     const nextIdx = this.#getNextWorkerIdx();
     childEnv.CLUSTER_IDX = String(nextIdx);
-    const cp = cluster2.fork(childEnv);
+    const cp = cluster2__default.default.fork(childEnv);
     cp.clusterIdx = nextIdx;
     return cp;
   }
@@ -905,13 +937,13 @@ var ClusterPrimary = class {
       return;
     }
     this.#restarting = true;
-    const current = Object.keys(cluster2.workers || {});
+    const current = Object.keys(cluster2__default.default.workers || {});
     const reqs = this.#size - current.length;
     if (reqs !== 0) {
       this.debug("resize %d -> %d, change = %d", current.length, this.#size, reqs);
       this.#resizeTo(this.#size, function() {
         self.debug("resize cb");
-        self.#rollingReplace(Object.keys(cluster2.workers || {}), finish);
+        self.#rollingReplace(Object.keys(cluster2__default.default.workers || {}), finish);
       });
       return;
     }
@@ -934,7 +966,7 @@ var ClusterPrimary = class {
       const first = i === 0;
       const id = ids[i];
       i += 1;
-      const worker = id !== void 0 && cluster2.workers ? cluster2.workers[id] : void 0;
+      const worker = id !== void 0 && cluster2__default.default.workers ? cluster2__default.default.workers[id] : void 0;
       if (self.#quitting) {
         if (worker && worker.process && worker.process.connected) {
           self.#emitAndDisconnect(worker);
@@ -1085,6 +1117,8 @@ clusterPrimary.constants = constants_exports;
 clusterPrimary.default = clusterPrimary;
 var index_default = clusterPrimary;
 
-export { ClusterPrimary, constants_exports as constants, index_default as default };
-//# sourceMappingURL=index.js.map
-//# sourceMappingURL=index.js.map
+exports.ClusterPrimary = ClusterPrimary;
+exports.constants = constants_exports;
+exports.default = index_default;
+//# sourceMappingURL=index.internal.cjs.map
+//# sourceMappingURL=index.internal.cjs.map

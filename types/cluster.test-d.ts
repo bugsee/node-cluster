@@ -48,7 +48,7 @@ new ClusterPrimary({ exec: 1 });
 // String shorthand is allowed.
 new ClusterPrimary('./worker.js');
 
-// --- callable default (cluster-master-ext shape) -------------------------
+// --- callable default ----------------------------------------------------
 
 const ev: ClusterEmitter = clusterPrimary({ exec: './worker.js', repl: false, signals: false });
 clusterPrimary.resize(2);
@@ -56,7 +56,9 @@ clusterPrimary.restart();
 clusterPrimary.debug('x');
 const viaDefault: typeof ClusterPrimary = clusterPrimary.ClusterPrimary;
 const minAlive: number = clusterPrimary.constants.MIN_ALIVE_MS;
+const aliveTimeout: number = clusterPrimary.constants.ALIVE_TIMEOUT_MS;
 const namedMinAlive: number = constants.MIN_ALIVE_MS;
+const selfDefault: typeof clusterPrimary = clusterPrimary.default;
 
 // @ts-expect-error -- cannot start without exec
 clusterPrimary({});
@@ -72,7 +74,9 @@ void size;
 void ev;
 void viaDefault;
 void minAlive;
+void aliveTimeout;
 void namedMinAlive;
+void selfDefault;
 void handler;
 
 // --- CJS require types (.d.cts) ------------------------------------------
@@ -83,5 +87,9 @@ import clusterPrimaryCjs = require('../dist/index.cjs');
 
 const cjsEmitter = clusterPrimaryCjs({ exec: './worker.js', repl: false, signals: false });
 const cjsPrimary = new clusterPrimaryCjs.ClusterPrimary({ exec: './worker.js', repl: false });
+const cjsAsFn: (cjsCfg: { exec: string }) => typeof cjsEmitter = clusterPrimaryCjs;
+const cjsDefault = clusterPrimaryCjs.default;
 void cjsEmitter;
 void cjsPrimary;
+void cjsAsFn;
+void cjsDefault;

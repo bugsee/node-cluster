@@ -1,6 +1,7 @@
 import type { ClusterEmitter, ClusterPrimaryConfig, ClusterConstants } from './types';
 import { ClusterPrimary } from './primary';
 import * as constants from './constants';
+import { packageState } from './state';
 
 export type {
     ClusterMessageHandler,
@@ -17,10 +18,8 @@ export type {
 export { ClusterPrimary };
 export { constants };
 
-let instance: ClusterPrimary | null = null;
-
 /**
- * Callable default export — same shape as `cluster-master-ext`.
+ * Callable default export.
  *
  * CommonJS: `const clusterPrimary = require('@bugsee/node-cluster')`
  * ESM: `import clusterPrimary, { ClusterPrimary } from '@bugsee/node-cluster'`
@@ -36,24 +35,35 @@ export interface ClusterPrimaryFn {
     close(): Promise<void>;
     ClusterPrimary: typeof ClusterPrimary;
     constants: ClusterConstants;
+    default: ClusterPrimaryFn;
 }
 
 function need(): ClusterPrimary {
-    if (!instance) {
+    const inst = packageState().singleton;
+    if (!inst) {
         throw new Error('cluster primary is not started');
     }
-    return instance;
+    return inst;
 }
 
 const clusterPrimary = function clusterPrimary(
     config: string | ClusterPrimaryConfig
 ): ClusterEmitter {
-    if (instance) {
-        throw new Error('This cluster has a master already');
+    const st = packageState();
+    if (st.singleton || st.owner) {
+        throw new Error('This process already has a cluster primary');
     }
-    instance = new ClusterPrimary(config);
-    instance.start();
-    return instance.emitter();
+    const inst = new ClusterPrimary(config);
+    st.singleton = inst;
+    try {
+        inst.start();
+    } catch (err) {
+        if (st.singleton === inst) {
+            st.singleton = null;
+        }
+        throw err;
+    }
+    return inst.emitter();
 } as ClusterPrimaryFn;
 
 clusterPrimary.resize = function (n?: number | undefined): void {
@@ -73,8 +83,9 @@ clusterPrimary.quitHard = function (): void {
 };
 
 clusterPrimary.debug = function (...args: unknown[]): void {
-    if (instance) {
-        instance.debug(...args);
+    const inst = packageState().singleton;
+    if (inst) {
+        inst.debug(...args);
         return;
     }
     console.error(...args);
@@ -85,15 +96,17 @@ clusterPrimary.emitter = function (): ClusterEmitter {
 };
 
 clusterPrimary.close = function (): Promise<void> {
-    if (!instance) {
+    const st = packageState();
+    const inst = st.singleton;
+    if (!inst) {
         return Promise.resolve();
     }
-    const inst = instance;
-    instance = null;
+    st.singleton = null;
     return inst.close();
 };
 
 clusterPrimary.ClusterPrimary = ClusterPrimary;
 clusterPrimary.constants = constants;
+clusterPrimary.default = clusterPrimary;
 
 export default clusterPrimary;

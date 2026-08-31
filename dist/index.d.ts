@@ -13,7 +13,6 @@ type ClusterWorker = Worker & {
 };
 /**
  * IPC handler attached with `worker.on('message', handler)` so `this` is the Worker.
- * Same contract as cluster-master-ext / the appserver cache L2 handler.
  */
 type ClusterMessageHandler = (this: ClusterWorker, message: unknown, handle?: Socket | node_net.Server) => void;
 /** Unix path, TCP port, `{ address, port }`, or `false`/`null` to disable. */
@@ -33,6 +32,8 @@ interface ClusterPrimaryConfig {
     stopTimeout?: number | undefined;
     skepticTimeout?: number | undefined;
     minAliveMs?: number | undefined;
+    /** How long to wait for `aliveEvent` before SIGKILL. Default 30000. `0` waits indefinitely. */
+    aliveTimeout?: number | undefined;
     silenceDebug?: boolean | undefined;
     /** Event that means a worker is ready. Default `'listening'` (HTTP). Tests often use `'online'`. */
     aliveEvent?: string | undefined;
@@ -71,6 +72,7 @@ interface ClusterConstants {
     readonly STOP_TIMEOUT_MS: number;
     readonly SKEPTIC_TIMEOUT_MS: number;
     readonly MIN_ALIVE_MS: number;
+    readonly ALIVE_TIMEOUT_MS: number;
     readonly DEFAULT_REPL: string;
 }
 
@@ -91,18 +93,20 @@ declare class ClusterPrimary {
 declare const STOP_TIMEOUT_MS = 5000;
 declare const SKEPTIC_TIMEOUT_MS = 2000;
 declare const MIN_ALIVE_MS = 2000;
+declare const ALIVE_TIMEOUT_MS = 30000;
 declare const DEFAULT_REPL: string;
 
+declare const constants_ALIVE_TIMEOUT_MS: typeof ALIVE_TIMEOUT_MS;
 declare const constants_DEFAULT_REPL: typeof DEFAULT_REPL;
 declare const constants_MIN_ALIVE_MS: typeof MIN_ALIVE_MS;
 declare const constants_SKEPTIC_TIMEOUT_MS: typeof SKEPTIC_TIMEOUT_MS;
 declare const constants_STOP_TIMEOUT_MS: typeof STOP_TIMEOUT_MS;
 declare namespace constants {
-  export { constants_DEFAULT_REPL as DEFAULT_REPL, constants_MIN_ALIVE_MS as MIN_ALIVE_MS, constants_SKEPTIC_TIMEOUT_MS as SKEPTIC_TIMEOUT_MS, constants_STOP_TIMEOUT_MS as STOP_TIMEOUT_MS };
+  export { constants_ALIVE_TIMEOUT_MS as ALIVE_TIMEOUT_MS, constants_DEFAULT_REPL as DEFAULT_REPL, constants_MIN_ALIVE_MS as MIN_ALIVE_MS, constants_SKEPTIC_TIMEOUT_MS as SKEPTIC_TIMEOUT_MS, constants_STOP_TIMEOUT_MS as STOP_TIMEOUT_MS };
 }
 
 /**
- * Callable default export — same shape as `cluster-master-ext`.
+ * Callable default export.
  *
  * CommonJS: `const clusterPrimary = require('@bugsee/node-cluster')`
  * ESM: `import clusterPrimary, { ClusterPrimary } from '@bugsee/node-cluster'`
@@ -118,6 +122,7 @@ interface ClusterPrimaryFn {
     close(): Promise<void>;
     ClusterPrimary: typeof ClusterPrimary;
     constants: ClusterConstants;
+    default: ClusterPrimaryFn;
 }
 declare const clusterPrimary: ClusterPrimaryFn;
 

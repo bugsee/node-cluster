@@ -74,13 +74,16 @@ describe('@bugsee/node-cluster', function () {
         it('CJS require() is the callable default with named properties', function () {
             expect(clusterPrimary).to.be.a('function');
             expect(clusterPrimary.ClusterPrimary).to.equal(ClusterPrimary);
+            expect(clusterPrimary.default).to.equal(clusterPrimary);
             expect(clusterPrimary.constants.MIN_ALIVE_MS).to.equal(2000);
+            expect(clusterPrimary.constants.ALIVE_TIMEOUT_MS).to.equal(30000);
         });
 
         it('ESM import default is the same callable', async function () {
             const mod = await import('../dist/index.js');
             expect(mod.default).to.be.a('function');
             expect(mod.ClusterPrimary).to.equal(mod.default.ClusterPrimary);
+            expect(mod.default.default).to.equal(mod.default);
             expect(mod.default.constants.STOP_TIMEOUT_MS).to.equal(5000);
         });
     });
@@ -151,6 +154,17 @@ describe('@bugsee/node-cluster', function () {
                 return cluster.workers[id].clusterIdx;
             }).sort();
             expect(idxs).to.deep.equal([0, 1]);
+        });
+
+        it('honors the last overlapping resize target', async function () {
+            primary.resize(4);
+            primary.resize(2);
+            await waitForCount(2);
+            expect(primary.size).to.equal(2);
+            await new Promise(function (resolve) {
+                setTimeout(resolve, 200);
+            });
+            expect(workerCount()).to.equal(2);
         });
 
         it('replaces workers on rolling restart', async function () {
@@ -284,7 +298,7 @@ describe('@bugsee/node-cluster', function () {
             await waitForCount(1);
             expect(function () {
                 clusterPrimary(testConfig({ size: 1 }));
-            }).to.throw(/master already/);
+            }).to.throw(/already has a cluster primary/);
         });
     });
 
@@ -344,6 +358,130 @@ describe('@bugsee/node-cluster', function () {
                     resolve();
                 });
             });
+        });
+    });
+
+    describe('REPL close during bind', function () {
+        let primary;
+        const sockPath = path.join(os.tmpdir(), 'node-cluster-close-' + process.pid + '.sock');
+
+        after(async function () {
+            if (primary) {
+                await primary.close();
+            }
+            try {
+                fs.unlinkSync(sockPath);
+            } catch {
+                // ignore
+            }
+        });
+
+        it('does not leave a listening socket', async function () {
+            try {
+                fs.unlinkSync(sockPath);
+            } catch {
+                // missing is fine
+            }
+            primary = new ClusterPrimary(testConfig({
+                size: 0,
+                repl: sockPath
+            }));
+            const started = primary.start();
+            await primary.close();
+            await started;
+            primary = null;
+            await new Promise(function (resolve) {
+                setTimeout(resolve, 150);
+            });
+            await new Promise(function (resolve, reject) {
+                const sock = net.connect(sockPath);
+                const timer = setTimeout(function () {
+                    sock.destroy();
+                    reject(new Error('repl still listening after close'));
+                }, 500);
+                sock.on('connect', function () {
+                    clearTimeout(timer);
+                    sock.destroy();
+                    reject(new Error('repl still listening after close'));
+                });
+                sock.on('error', function () {
+                    clearTimeout(timer);
+                    resolve();
+                });
+            });
+        });
+    });
+
+    describe('process-wide primary lock', function () {
+        let primary;
+
+        after(async function () {
+            if (primary) {
+                await primary.close();
+                primary = null;
+            }
+            await clusterPrimary.close();
+        });
+
+        it('rejects a second ClusterPrimary.start()', async function () {
+            primary = new ClusterPrimary(testConfig({ size: 1 }));
+            await primary.start();
+            const other = new ClusterPrimary(testConfig({ size: 1 }));
+            expect(function () {
+                other.start();
+            }).to.throw(/already has a cluster primary/);
+        });
+
+        it('rejects a second start across require and import', async function () {
+            const mod = await import('../dist/index.js');
+            expect(function () {
+                mod.default(testConfig({ size: 1 }));
+            }).to.throw(/already has a cluster primary/);
+        });
+    });
+
+    describe('restart abort', function () {
+        let primary;
+
+        after(async function () {
+            if (primary) {
+                await primary.close();
+            }
+        });
+
+        it('emits restartComplete when the first newbie dies during skeptic', async function () {
+            primary = new ClusterPrimary(testConfig({
+                size: 1,
+                skepticTimeout: 400
+            }));
+            await primary.start();
+            expect(workerCount()).to.equal(1);
+            const origId = Object.keys(cluster.workers)[0];
+            const origPid = cluster.workers[origId].process.pid;
+
+            const completed = new Promise(function (resolve, reject) {
+                const timer = setTimeout(function () {
+                    reject(new Error('restartComplete timeout'));
+                }, 5000);
+                primary.emitter().once('restartComplete', function () {
+                    clearTimeout(timer);
+                    resolve();
+                });
+            });
+
+            primary.restart();
+            await waitUntil(function () {
+                return workerCount() === 2;
+            }, 4000);
+
+            const newbie = Object.keys(cluster.workers).map(function (id) {
+                return cluster.workers[id];
+            }).find(function (w) {
+                return w.process.pid !== origPid;
+            });
+            expect(newbie).to.not.equal(undefined);
+            newbie.process.kill('SIGKILL');
+            await completed;
         });
     });
 });

@@ -70,7 +70,7 @@ function isAddressPort(value: ClusterReplListen): value is { address: string; po
 
 /**
  * Optional REPL on a unix socket, TCP port, or `{ address, port }`.
- * TCP is unauthenticated (same as cluster-master-ext).
+ * TCP has no authentication — bind it only on a trusted interface.
  */
 export function startRepl(host: ReplHost, replAddressPath: Exclude<ClusterReplListen, false | null>): ReplHandle {
     let listenTarget: string | number | null = null;
@@ -87,6 +87,7 @@ export function startRepl(host: ReplHost, replAddressPath: Exclude<ClusterReplLi
     let connections = 0;
     let nextSockId = 0;
     let replServer: net.Server | null = null;
+    let closed = false;
     const socketPath = typeof listenTarget === 'string' ? listenTarget : null;
 
     function attachContext(r: REPLServer, sock: DebugStream): void {
@@ -95,11 +96,11 @@ export function startRepl(host: ReplHost, replAddressPath: Exclude<ClusterReplLi
             'repl        - access the REPL',
             'resize(n)   - resize the cluster to `n` workers',
             'restart(cb) - gracefully restart workers, cb is optional',
-            'stop()      - gracefully stop workers and master',
-            'kill()      - forcefully kill workers and master',
+            'stop()      - gracefully stop workers and primary',
+            'kill()      - forcefully kill workers and primary',
             'cluster     - node.js cluster module',
             'size        - current cluster size',
-            'connections - number of REPL connections to master',
+            'connections - number of REPL connections to primary',
             'workers     - current workers',
             'select(fld) - map of id to field (from workers)',
             'pids        - map of id to pids',
@@ -190,7 +191,7 @@ export function startRepl(host: ReplHost, replAddressPath: Exclude<ClusterReplLi
 
         sock.write('Starting repl #' + String(sock.id));
         const r = repl.start({
-            prompt: 'ClusterMaster (`help` for cmds) ' + process.pid + ' ' + String(sock.id) + '> ',
+            prompt: 'cluster (`help` for cmds) ' + process.pid + ' ' + String(sock.id) + '> ',
             input: sock,
             output: sock,
             terminal: true,
@@ -241,15 +242,18 @@ export function startRepl(host: ReplHost, replAddressPath: Exclude<ClusterReplLi
     }
 
     function listen(): void {
-        if (listenTarget === null) {
+        if (closed || listenTarget === null) {
             return;
         }
         replServer = net.createServer(onConnection);
         function onListening(): void {
+            if (closed) {
+                return;
+            }
             if (socketAddress) {
-                host.debug('ClusterMaster repl listening on ' + socketAddress + ':' + String(listenTarget));
+                host.debug('cluster repl listening on ' + socketAddress + ':' + String(listenTarget));
             } else {
-                host.debug('ClusterMaster repl listening on ' + String(listenTarget));
+                host.debug('cluster repl listening on ' + String(listenTarget));
             }
         }
         if (socketAddress) {
@@ -259,20 +263,30 @@ export function startRepl(host: ReplHost, replAddressPath: Exclude<ClusterReplLi
         }
     }
 
+    let resolveListenReady: () => void = function () {};
+    const listenReady = new Promise<void>(function (resolve) {
+        resolveListenReady = resolve;
+    });
+
     if (socketPath) {
         fs.unlink(socketPath, function (err) {
             if (err && (err as NodeJS.ErrnoException).code !== 'ENOENT') {
-                throw err;
+                host.debug('repl socket unlink failed', err);
             }
-            listen();
+            if (!closed) {
+                listen();
+            }
+            resolveListenReady();
         });
     } else {
         listen();
+        resolveListenReady();
     }
 
     return {
         close: function () {
-            return new Promise<void>(function (resolve) {
+            closed = true;
+            return listenReady.then(function () {
                 const debugStreams = host.debugStreams;
                 Object.keys(debugStreams).forEach(function (key) {
                     try {
@@ -283,17 +297,12 @@ export function startRepl(host: ReplHost, replAddressPath: Exclude<ClusterReplLi
                     delete debugStreams[key];
                 });
                 if (!replServer) {
-                    resolve();
-                    return;
+                    return undefined;
                 }
                 const server = replServer;
                 replServer = null;
-                server.close(function () {
-                    if (!socketPath) {
-                        resolve();
-                        return;
-                    }
-                    fs.unlink(socketPath, function () {
+                return new Promise<void>(function (resolve) {
+                    server.close(function () {
                         resolve();
                     });
                 });
